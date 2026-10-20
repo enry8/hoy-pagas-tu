@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Hoy pagas tú, yo mañana</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & ReactDOM CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel CDN para transpilar JSX en vivo -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Lucide Icons & Confetti -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    /* Estilos personalizados adicionales */
+    body {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // Iconos de Lucide empaquetados mediante componente React
+    const Icon = ({ name, color = "currentColor", size = 20, className = "" }) => {
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      }, [name]);
+
+      return <i data-lucide={name} style={{ color, fontSize: size }} class={`inline-block ${className}`}></i>;
+    };
+
+    // Datos iniciales de ejemplo
+    const DEFAULT_MEMBERS = [
+      { id: "1", name: "Carlos", avatar: "👨‍💼" },
+      { id: "2", name: "María", avatar: "👩‍💻" },
+      { id: "3", name: "Dani", avatar: "🧔" },
+      { id: "4", name: "Laura", avatar: "👩‍🎨" },
+    ];
+
+    const DEFAULT_EXPENSES = [
+      {
+        id: "e1",
+        type: "Desayuno",
+        amount: 11.20,
+        payerId: "1",
+        participantIds: ["1", "2", "3", "4"],
+        date: "2026-10-18T09:30:00.000Z",
+        note: "Tostadas y cafés"
+      },
+      {
+        id: "e2",
+        type: "Cañas",
+        amount: 14.50,
+        payerId: "2",
+        participantIds: ["1", "2", "3"],
+        date: "2026-10-19T18:30:00.000Z",
+        note: "Ronda de cañas viernes"
+      }
+    ];
+
+    function App() {
+      // Estado con carga desde localStorage
+      const [members, setMembers] = useState(() => {
+        const saved = localStorage.getItem('hpt_members');
+        return saved ? JSON.parse(saved) : DEFAULT_MEMBERS;
+      });
+
+      const [expenses, setExpenses] = useState(() => {
+        const saved = localStorage.getItem('hpt_expenses');
+        return saved ? JSON.parse(saved) : DEFAULT_EXPENSES;
+      });
+
+      const [activeTab, setActiveTab] = useState('home'); // home, new, stats, settle, settings
+      
+      // Formulario de nuevo gasto
+      const [type, setType] = useState('Desayuno');
+      const [amount, setAmount] = useState('');
+      const [payerId, setPayerId] = useState(members[0]?.id || '');
+      const [selectedParticipants, setSelectedParticipants] = useState(members.map(m => m.id));
+      const [note, setNote] = useState('');
+
+      // Formulario de nuevo miembro
+      const [newMemberName, setNewMemberName] = useState('');
+      const [newMemberAvatar, setNewMemberAvatar] = useState('👤');
+
+      // Guardar en localStorage cada cambio
+      useEffect(() => {
+        localStorage.setItem('hpt_members', JSON.stringify(members));
+      }, [members]);
+
+      useEffect(() => {
+        localStorage.setItem('hpt_expenses', JSON.stringify(expenses));
+      }, [expenses]);
+
+      useEffect(() => {
+        if (members.length > 0 && !payerId) {
+          setPayerId(members[0].id);
+        }
+      }, [members]);
+
+      // --- CÁLCULO DE BALANCES ---
+      const balances = useMemo(() => {
+        const balMap = {};
+        members.forEach(m => {
+          balMap[m.id] = { ...m, paid: 0, consumed: 0, net: 0, countPaid: 0, countAttended: 0 };
+        });
+
+        expenses.forEach(e => {
+          const amt = parseFloat(e.amount) || 0;
+          const numParts = e.participantIds.length;
+          const costPerPerson = numParts > 0 ? amt / numParts : 0;
+
+          if (balMap[e.payerId]) {
+            balMap[e.payerId].paid += amt;
+            balMap[e.payerId].countPaid += 1;
+          }
+
+          e.participantIds.forEach(pId => {
+            if (balMap[pId]) {
+              balMap[pId].consumed += costPerPerson;
+              balMap[pId].countAttended += 1;
+            }
+          });
+        });
+
+        Object.keys(balMap).forEach(id => {
+          balMap[id].net = balMap[id].paid - balMap[id].consumed;
+        });
+
+        return Object.values(balMap);
+      }, [members, expenses]);
+
+      // Quién debe pagar hoy (quien tenga el net más bajo)
+      const priorityPayer = useMemo(() => {
+        if (balances.length === 0
